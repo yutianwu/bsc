@@ -343,6 +343,7 @@ func (s *StateDB) MergeSlotDB(slotDb *StateDB, slotReceipt *types.Receipt, txInd
 	}
 
 	// only merge dirty objects
+	addressesToPrefetch := make([][]byte, 0, len(slotDb.stateObjectsDirty))
 	for addr := range slotDb.stateObjectsDirty {
 		if _, exist := s.stateObjectsDirty[addr]; !exist {
 			s.stateObjectsDirty[addr] = struct{}{}
@@ -420,6 +421,11 @@ func (s *StateDB) MergeSlotDB(slotDb *StateDB, slotReceipt *types.Receipt, txInd
 			// update the object
 			s.storeStateObjectToStateDB(addr, newMainObj)
 		}
+		addressesToPrefetch = append(addressesToPrefetch, common.CopyBytes(addr[:])) // Copy needed for closure
+	}
+
+	if s.prefetcher != nil && len(addressesToPrefetch) > 0 {
+		s.prefetcher.prefetch(s.originalRoot, addressesToPrefetch, emptyAddr) // prefetch for trie node of account
 	}
 
 	for addr := range slotDb.stateObjectsPending {
@@ -1610,7 +1616,12 @@ func (s *StateDB) Finalise(deleteEmptyObjects bool) {
 				delete(s.snapStorage, obj.address)        // Clear out any previously updated storage data (may be recreated via a ressurrect)
 			}
 		} else {
-			obj.finalise(true) // Prefetch slots in the background
+			// 1.none parallel mode, we do obj.finalise(true) as normal
+			// 2.with parallel mode, we do obj.finalise(true) on dispatcher, not on slot routine
+			//   obj.finalise(true) will clear its dirtyStorage, will make prefetch broken.
+			if !s.isParallel || !s.parallel.isSlotDB {
+				obj.finalise(true) // Prefetch slots in the background
+			}
 		}
 		if _, exist := s.stateObjectsPending[addr]; !exist {
 			s.stateObjectsPending[addr] = struct{}{}
