@@ -440,7 +440,7 @@ func (s *StateDB) MergeSlotDB(slotDb *StateDB, slotReceipt *types.Receipt, txInd
 		s.preimages[hash] = preimage
 	}
 	if s.accessList != nil {
-		// fixme: accessList is not enabled yet, should use merged rather than overwrite
+		// fixme: accessList is not enabled yet, but it should use merge rather than overwrite Copy
 		s.accessList = slotDb.accessList.Copy()
 	}
 
@@ -452,18 +452,19 @@ func (s *StateDB) MergeSlotDB(slotDb *StateDB, slotReceipt *types.Receipt, txInd
 			// We fixed it by add a addr state read record for add balance 0
 			s.snapDestructs[k] = struct{}{}
 		}
-		// fixme: slotDb.snapAccounts should be empty and can be deleted
-		for k, v := range slotDb.snapAccounts {
-			s.snapAccounts[k] = v
-		}
-		// fixme: slotDb.snapStorage should be empty and can be deleted
-		for k, v := range slotDb.snapStorage {
-			temp := make(map[string][]byte)
-			for kk, vv := range v {
-				temp[kk] = vv
-			}
-			s.snapStorage[k] = temp
-		}
+
+		// slotDb.snapAccounts should be empty, comment out and to be deleted later
+		// for k, v := range slotDb.snapAccounts {
+		//	s.snapAccounts[k] = v
+		// }
+		// slotDb.snapStorage should be empty, comment out and to be deleted later
+		// for k, v := range slotDb.snapStorage {
+		// 	temp := make(map[string][]byte)
+		//	for kk, vv := range v {
+		//		temp[kk] = vv
+		//	}
+		//	s.snapStorage[k] = temp
+		// }
 	}
 
 	// to create a new object to store change list for conflict detect,

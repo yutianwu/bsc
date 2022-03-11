@@ -406,7 +406,7 @@ type ParallelTxRequest struct {
 	txIndex         int
 	tx              *types.Transaction
 	slotDB          *state.StateDB
-	gp              *GasPool
+	gasLimit        uint64
 	msg             types.Message
 	block           *types.Block
 	vmConfig        vm.Config
@@ -422,7 +422,7 @@ func (p *StateProcessor) InitParallelOnce() {
 		return
 	}
 	log.Info("Parallel execution mode is enabled", "Parallel Num", ParallelExecNum, "CPUNum", runtime.NumCPU())
-	p.paraTxResultChan = make(chan *ParallelTxResult, ParallelExecNum) // fixme: use blocked chan?
+	p.paraTxResultChan = make(chan *ParallelTxResult, ParallelExecNum)
 	p.slotState = make([]*SlotState, ParallelExecNum)
 
 	wg := sync.WaitGroup{} // make sure all goroutines are created and started
@@ -601,7 +601,7 @@ func (p *StateProcessor) dispatchToIdleSlot(statedb *state.StateDB, txReq *Paral
 }
 
 // wait until the next Tx is executed and its result is merged to the main stateDB
-func (p *StateProcessor) waitUntilNextTxDone(statedb *state.StateDB) *ParallelTxResult {
+func (p *StateProcessor) waitUntilNextTxDone(statedb *state.StateDB, gp *GasPool) *ParallelTxResult {
 	var result *ParallelTxResult
 	for {
 		result = <-p.paraTxResultChan
@@ -624,6 +624,13 @@ func (p *StateProcessor) waitUntilNextTxDone(statedb *state.StateDB) *ParallelTx
 		// ok, the tx result is valid and can be merged
 		break
 	}
+
+	if err := gp.SubGas(result.receipt.GasUsed); err != nil {
+		log.Error("gas limit reached", "block", result.txReq.block.Number(),
+			"txIndex", result.txReq.txIndex, "GasUsed", result.receipt.GasUsed, "gp.Gas", gp.Gas())
+		panic(fmt.Sprintf("gas limit reached, GasUsed:%d, gp.Gas:%d", result.receipt.GasUsed, gp.Gas()))
+	}
+
 	resultSlotIndex := result.slotIndex
 	resultTxIndex := result.txReq.txIndex
 	resultSlotState := p.slotState[resultSlotIndex]
@@ -655,14 +662,14 @@ func (p *StateProcessor) execInParallelSlot(slotIndex int, txReq *ParallelTxRequ
 	txIndex := txReq.txIndex
 	tx := txReq.tx
 	slotDB := txReq.slotDB
-	gp := txReq.gp // fixme: goroutine unsafe
+	slotGasLimit := txReq.gasLimit // not accurate, but it is ok for block import.
 	msg := txReq.msg
 	block := txReq.block
 	header := block.Header()
 	cfg := txReq.vmConfig
 	bloomProcessors := txReq.bloomProcessors
 
-	blockContext := NewEVMBlockContext(header, p.bc, nil) // fixme: share blockContext within a block?
+	blockContext := NewEVMBlockContext(header, p.bc, nil) // can share blockContext within a block for efficiency
 	vmenv := vm.NewEVM(blockContext, vm.TxContext{}, slotDB, p.config, cfg)
 
 	var receipt *types.Receipt
@@ -673,7 +680,6 @@ func (p *StateProcessor) execInParallelSlot(slotIndex int, txReq *ParallelTxRequ
 	slotDB.Prepare(tx.Hash(), block.Hash(), txIndex)
 	log.Debug("exec In Slot", "Slot", slotIndex, "txIndex", txIndex, "slotDB.baseTxIndex", slotDB.BaseTxIndex())
 
-	slotGasLimit := gp.Gas()
 	gpSlot := new(GasPool).AddGas(slotGasLimit) // each slot would use its own gas pool, and will do gaslimit check later
 	evm, result, err = applyTransactionStageExecution(msg, gpSlot, slotDB, vmenv)
 	log.Debug("Stage Execution done", "Slot", slotIndex, "txIndex", txIndex, "slotDB.baseTxIndex", slotDB.BaseTxIndex())
@@ -688,9 +694,8 @@ func (p *StateProcessor) execInParallelSlot(slotIndex int, txReq *ParallelTxRequ
 		}
 	}
 
-	// in parallel, tx can run into trouble
-	// for example: err="nonce too high"
-	// in this case, we will do re-run.
+	// in parallel mode, tx can run into trouble, for example: err="nonce too high"
+	// in these cases, we will wait and re-run.
 	if err != nil {
 		p.debugErrorRedoNum++
 		log.Debug("Stage Execution err", "Slot", slotIndex, "txIndex", txIndex,
@@ -706,10 +711,8 @@ func (p *StateProcessor) execInParallelSlot(slotIndex int, txReq *ParallelTxRequ
 		p.paraTxResultChan <- redoResult
 		slotDB = <-p.slotState[slotIndex].slotdbChan
 		slotDB.Prepare(tx.Hash(), block.Hash(), txIndex)
-		// vmenv.Reset(vm.TxContext{}, slotDB)
 		log.Debug("Stage Execution get new slotdb to redo", "Slot", slotIndex,
 			"txIndex", txIndex, "new slotDB.baseTxIndex", slotDB.BaseTxIndex())
-		slotGasLimit = gp.Gas()
 		gpSlot = new(GasPool).AddGas(slotGasLimit)
 		evm, result, err = applyTransactionStageExecution(msg, gpSlot, slotDB, vmenv)
 		if err != nil {
@@ -717,14 +720,9 @@ func (p *StateProcessor) execInParallelSlot(slotIndex int, txReq *ParallelTxRequ
 		}
 	}
 
-	// fixme:
-	// parallel mode can not precheck,
-	// precheck should be replace by postCheck when previous Tx is finalized
-
 	// do conflict detect
 	hasConflict := false
 	systemAddrConflict := false
-
 	log.Debug("Stage Execution done, do conflict check", "Slot", slotIndex, "txIndex", txIndex)
 	if slotDB.SystemAddressRedo() {
 		hasConflict = true
@@ -738,7 +736,6 @@ func (p *StateProcessor) execInParallelSlot(slotIndex int, txReq *ParallelTxRequ
 			// check all finalizedDb from current slot's
 			for _, changeList := range p.slotState[index].mergedChangeList {
 				if changeList.TxIndex <= slotDB.BaseTxIndex() {
-					// log.Debug("skip finalized DB which is out of the conflict window", "finDb.txIndex", finDb.txIndex, "slotDB.baseTxIndex", slotDB.baseTxIndex)
 					continue
 				}
 				if p.hasStateConflict(slotDB, changeList) {
@@ -770,8 +767,6 @@ func (p *StateProcessor) execInParallelSlot(slotIndex int, txReq *ParallelTxRequ
 		p.paraTxResultChan <- redoResult
 		slotDB = <-p.slotState[slotIndex].slotdbChan
 		slotDB.Prepare(tx.Hash(), block.Hash(), txIndex)
-		// vmenv.Reset(vm.TxContext{}, slotDB)
-		slotGasLimit = gp.Gas()
 		gpSlot = new(GasPool).AddGas(slotGasLimit)
 		evm, result, err = applyTransactionStageExecution(msg, gpSlot, slotDB, vmenv)
 		if err != nil {
@@ -785,11 +780,6 @@ func (p *StateProcessor) execInParallelSlot(slotIndex int, txReq *ParallelTxRequ
 		log.Error("gasConsumed != result.UsedGas mismatch",
 			"gasConsumed", gasConsumed, "result.UsedGas", result.UsedGas)
 		panic(fmt.Sprintf("gas consume mismatch, consumed:%d, result.UsedGas:%d", gasConsumed, result.UsedGas))
-	}
-
-	if err := gp.SubGas(gasConsumed); err != nil {
-		log.Error("gas limit reached", "gasConsumed", gasConsumed, "gp", gp.Gas())
-		panic(fmt.Sprintf("gas limit reached, gasConsumed:%d, gp.Gas():%d", gasConsumed, gp.Gas()))
 	}
 
 	log.Debug("ok to finalize this TX",
@@ -817,7 +807,6 @@ func (p *StateProcessor) execInParallelSlot(slotIndex int, txReq *ParallelTxRequ
 func (p *StateProcessor) runSlotLoop(slotIndex int) {
 	curSlot := p.slotState[slotIndex]
 	for {
-		// log.Info("parallel slot waiting", "Slot", slotIndex)
 		// wait for new TxReq
 		txReq := <-curSlot.pendingTxReqChan
 		// receive a dispatched message
@@ -873,10 +862,10 @@ func (p *StateProcessor) preExecute(block *types.Block, statedb *state.StateDB, 
 	// Handle upgrade build-in system contract code
 	systemcontracts.UpgradeBuildInSystemContract(p.config, block.Number(), statedb)
 
-	blockContext := NewEVMBlockContext(block.Header(), p.bc, nil)
 	// with parallel mode, vmenv will be created inside of slot
 	var vmenv *vm.EVM
 	if !parallel {
+		blockContext := NewEVMBlockContext(block.Header(), p.bc, nil)
 		vmenv = vm.NewEVM(blockContext, vm.TxContext{}, statedb, p.config, cfg)
 	}
 
@@ -982,7 +971,8 @@ func (p *StateProcessor) ProcessParallel(block *types.Block, statedb *state.Stat
 			}
 		}
 
-		msg, err := tx.AsMessage(signer) // fixme: move it into slot.
+		// can be moved it into slot for efficiency, but signer is not concurrent safe
+		msg, err := tx.AsMessage(signer)
 		if err != nil {
 			return statedb, nil, nil, 0, err
 		}
@@ -995,7 +985,7 @@ func (p *StateProcessor) ProcessParallel(block *types.Block, statedb *state.Stat
 			txIndex:         i,
 			tx:              tx,
 			slotDB:          nil,
-			gp:              gp,
+			gasLimit:        gp.Gas(),
 			msg:             msg,
 			block:           block,
 			vmConfig:        cfg,
@@ -1005,7 +995,7 @@ func (p *StateProcessor) ProcessParallel(block *types.Block, statedb *state.Stat
 			curTxChan:       curTxChan,
 		}
 
-		// fixme: to optimize the for { for {} } loop code style
+		// to optimize the for { for {} } loop code style? it is ok right now.
 		for {
 			if p.queueSameToAddress(txReq) {
 				break
@@ -1015,12 +1005,11 @@ func (p *StateProcessor) ProcessParallel(block *types.Block, statedb *state.Stat
 			}
 			// if idle slot available, just dispatch and process next tx.
 			if p.dispatchToIdleSlot(statedb, txReq) {
-				// log.Info("ProcessParallel dispatch to idle slot", "txIndex", txReq.txIndex)
 				break
 			}
 			log.Debug("ProcessParallel no slot available, wait", "txIndex", txReq.txIndex)
 			// no idle slot, wait until a tx is executed and merged.
-			result := p.waitUntilNextTxDone(statedb)
+			result := p.waitUntilNextTxDone(statedb, gp)
 
 			// update tx result
 			if result.err != nil {
@@ -1028,6 +1017,7 @@ func (p *StateProcessor) ProcessParallel(block *types.Block, statedb *state.Stat
 					"resultTxIndex", result.txReq.txIndex, "result.err", result.err)
 				return statedb, nil, nil, 0, fmt.Errorf("could not apply tx %d [%v]: %w", result.txReq.txIndex, result.txReq.tx.Hash().Hex(), result.err)
 			}
+
 			commonTxs = append(commonTxs, result.txReq.tx)
 			receipts = append(receipts, result.receipt)
 		}
@@ -1035,7 +1025,7 @@ func (p *StateProcessor) ProcessParallel(block *types.Block, statedb *state.Stat
 
 	// wait until all tx request are done
 	for len(commonTxs)+len(systemTxs) < txNum {
-		result := p.waitUntilNextTxDone(statedb)
+		result := p.waitUntilNextTxDone(statedb, gp)
 		// update tx result
 		if result.err != nil {
 			log.Warn("ProcessParallel a failed tx", "resultSlotIndex", result.slotIndex,
