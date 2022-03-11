@@ -809,12 +809,12 @@ var (
 	ParallelTxNumFlag = cli.IntFlag{
 		Name:  "parallel.num",
 		Usage: "Number of slot for transaction execution, only valid in parallel mode (default: CPUNum - 1)",
-		Value: core.ParallelExecNum,
+		Value: core.DefaultProcessConfig.ParallelExecNum,
 	}
 	ParallelTxQueueSizeFlag = cli.IntFlag{
 		Name:  "parallel.queuesize",
 		Usage: "Max number of Tx that can be queued to a slot, only valid in parallel mode",
-		Value: core.MaxPendingQueueSize,
+		Value: core.DefaultProcessConfig.MaxPendingQueueSize,
 	}
 
 	// Init network
@@ -1337,13 +1337,13 @@ func SetNodeConfig(ctx *cli.Context, cfg *node.Config) {
 		cfg.InsecureUnlockAllowed = ctx.GlobalBool(InsecureUnlockAllowedFlag.Name)
 	}
 	if ctx.GlobalIsSet(ParallelTxFlag.Name) {
-		core.ParallelTxMode = true
+		core.DefaultProcessConfig.ParallelTxMode = true
 	}
 	if ctx.GlobalIsSet(ParallelTxNumFlag.Name) {
-		core.ParallelExecNum = ctx.GlobalInt(ParallelTxNumFlag.Name)
+		core.DefaultProcessConfig.ParallelExecNum = ctx.GlobalInt(ParallelTxNumFlag.Name)
 	}
 	if ctx.GlobalIsSet(ParallelTxQueueSizeFlag.Name) {
-		core.MaxPendingQueueSize = ctx.GlobalInt(ParallelTxQueueSizeFlag.Name)
+		core.DefaultProcessConfig.MaxPendingQueueSize = ctx.GlobalInt(ParallelTxQueueSizeFlag.Name)
 	}
 
 }
