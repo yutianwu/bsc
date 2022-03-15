@@ -29,6 +29,7 @@ import (
 	"sync"
 	"testing"
 	"testing/quick"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/rawdb"
@@ -1330,4 +1331,39 @@ func TestMergeSlotDB(t *testing.T) {
 	if _, ok := changeList.AddrStateChangeSet[addr]; !ok {
 		t.Fatalf("address should exist in AddrStateChangeSet")
 	}
+}
+
+func TestMap(t *testing.T) {
+	pool := map[int]int{}
+	poolTime := benchmark(func() {
+		useMapForSomething(pool)
+
+		// Return to pool by clearing the map.
+		for key := range pool {
+			delete(pool, key)
+		}
+	})
+
+	nopoolTime := benchmark(func() {
+		useMapForSomething(map[int]int{})
+	})
+
+	fmt.Println("Pool time:", poolTime)
+	fmt.Println("No-pool time:", nopoolTime)
+}
+func useMapForSomething(m map[int]int) {
+	for i := 0; i < 1000; i++ {
+		m[rand.Intn(300)] += 5
+	}
+}
+
+const BenchIters = 1000
+
+// benchmark measures how long f takes, on average.
+func benchmark(f func()) time.Duration {
+	start := time.Now().UnixNano()
+	for i := 0; i < BenchIters; i++ {
+		f()
+	}
+	return time.Nanosecond * time.Duration((time.Now().UnixNano()-start)/BenchIters)
 }

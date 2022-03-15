@@ -1441,36 +1441,125 @@ func (s *StateDB) Copy() *StateDB {
 	return state
 }
 
+var addressStructPool = sync.Pool{
+	New: func() interface{} { return make(map[common.Address]struct{}, defaultNumOfSlots) },
+}
+
+var journalPool = sync.Pool{
+	New: func() interface{} {
+		return &journal{
+			dirties: make(map[common.Address]int, defaultNumOfSlots),
+			entries: make([]journalEntry, 0, defaultNumOfSlots),
+		}
+	},
+}
+
+var stateKeysPool = sync.Pool{
+	New: func() interface{} { return make(map[common.Address]StateKeys, defaultNumOfSlots) },
+}
+
+var stateObjectsPool = sync.Pool{
+	New: func() interface{} { return make(map[common.Address]*StateObject, defaultNumOfSlots) },
+}
+
+func (s *StateDB) SlotDBPutSyncPool() {
+	for key := range s.parallel.stateObjectsSuicidedInSlot {
+		delete(s.parallel.stateObjectsSuicidedInSlot, key)
+	}
+	addressStructPool.Put(s.parallel.stateObjectsSuicidedInSlot)
+
+	for key := range s.parallel.codeReadsInSlot {
+		delete(s.parallel.codeReadsInSlot, key)
+	}
+	addressStructPool.Put(s.parallel.codeReadsInSlot)
+
+	for key := range s.parallel.codeChangesInSlot {
+		delete(s.parallel.codeChangesInSlot, key)
+	}
+	addressStructPool.Put(s.parallel.codeChangesInSlot)
+
+	for key := range s.parallel.balanceChangesInSlot {
+		delete(s.parallel.balanceChangesInSlot, key)
+	}
+	addressStructPool.Put(s.parallel.balanceChangesInSlot)
+
+	for key := range s.parallel.balanceReadsInSlot {
+		delete(s.parallel.balanceReadsInSlot, key)
+	}
+	addressStructPool.Put(s.parallel.balanceReadsInSlot)
+
+	for key := range s.parallel.addrStateReadsInSlot {
+		delete(s.parallel.addrStateReadsInSlot, key)
+	}
+	addressStructPool.Put(s.parallel.addrStateReadsInSlot)
+
+	for key := range s.parallel.nonceChangesInSlot {
+		delete(s.parallel.nonceChangesInSlot, key)
+	}
+	addressStructPool.Put(s.parallel.nonceChangesInSlot)
+
+	for key := range s.stateObjectsPending {
+		delete(s.stateObjectsPending, key)
+	}
+	addressStructPool.Put(s.stateObjectsPending)
+
+	for key := range s.stateObjectsDirty {
+		delete(s.stateObjectsDirty, key)
+	}
+	addressStructPool.Put(s.stateObjectsDirty)
+
+	for key := range s.journal.dirties {
+		delete(s.journal.dirties, key)
+	}
+	s.journal.entries = s.journal.entries[:0]
+	journalPool.Put(s.journal)
+
+	for key := range s.parallel.stateChangesInSlot {
+		delete(s.parallel.stateChangesInSlot, key)
+	}
+	stateKeysPool.Put(s.parallel.stateChangesInSlot)
+
+	for key := range s.parallel.stateReadsInSlot {
+		delete(s.parallel.stateReadsInSlot, key)
+	}
+	stateKeysPool.Put(s.parallel.stateReadsInSlot)
+
+	for key := range s.parallel.dirtiedStateObjectsInSlot {
+		delete(s.parallel.dirtiedStateObjectsInSlot, key)
+	}
+	stateObjectsPool.Put(s.parallel.dirtiedStateObjectsInSlot)
+}
+
 // Copy all the basic fields, initialize the memory ones
 func (s *StateDB) CopyForSlot() *StateDB {
 	parallel := ParallelState{
 		// use base(dispatcher) slot db's stateObjects.
 		// It is a SyncMap, only readable to slot, not writable
 		stateObjects:               s.parallel.stateObjects,
-		stateObjectsSuicidedInSlot: make(map[common.Address]struct{}, 10),
-		codeReadsInSlot:            make(map[common.Address]struct{}, defaultNumOfSlots),
-		codeChangesInSlot:          make(map[common.Address]struct{}, 10),
-		stateChangesInSlot:         make(map[common.Address]StateKeys, defaultNumOfSlots),
-		stateReadsInSlot:           make(map[common.Address]StateKeys, defaultNumOfSlots),
-		balanceChangesInSlot:       make(map[common.Address]struct{}, defaultNumOfSlots),
-		balanceReadsInSlot:         make(map[common.Address]struct{}, defaultNumOfSlots),
-		addrStateReadsInSlot:       make(map[common.Address]struct{}, defaultNumOfSlots),
-		addrStateChangesInSlot:     make(map[common.Address]struct{}, 10),
-		nonceChangesInSlot:         make(map[common.Address]struct{}, 10),
+		stateObjectsSuicidedInSlot: addressStructPool.Get().(map[common.Address]struct{}),
+		codeReadsInSlot:            addressStructPool.Get().(map[common.Address]struct{}),
+		codeChangesInSlot:          addressStructPool.Get().(map[common.Address]struct{}),
+		stateChangesInSlot:         stateKeysPool.Get().(map[common.Address]StateKeys),
+		stateReadsInSlot:           stateKeysPool.Get().(map[common.Address]StateKeys),
+		balanceChangesInSlot:       addressStructPool.Get().(map[common.Address]struct{}),
+		balanceReadsInSlot:         addressStructPool.Get().(map[common.Address]struct{}),
+		addrStateReadsInSlot:       addressStructPool.Get().(map[common.Address]struct{}),
+		addrStateChangesInSlot:     addressStructPool.Get().(map[common.Address]struct{}),
+		nonceChangesInSlot:         addressStructPool.Get().(map[common.Address]struct{}),
 		isSlotDB:                   true,
-		dirtiedStateObjectsInSlot:  make(map[common.Address]*StateObject, defaultNumOfSlots),
+		dirtiedStateObjectsInSlot:  stateObjectsPool.Get().(map[common.Address]*StateObject),
 	}
 	state := &StateDB{
 		db:                  s.db,
 		trie:                s.db.CopyTrie(s.trie),
 		stateObjects:        make(map[common.Address]*StateObject), // replaced by parallel.stateObjects in parallel mode
-		stateObjectsPending: make(map[common.Address]struct{}, defaultNumOfSlots),
-		stateObjectsDirty:   make(map[common.Address]struct{}, defaultNumOfSlots),
+		stateObjectsPending: addressStructPool.Get().(map[common.Address]struct{}),
+		stateObjectsDirty:   addressStructPool.Get().(map[common.Address]struct{}),
 		refund:              s.refund, // should be 0
 		logs:                make(map[common.Hash][]*types.Log, defaultNumOfSlots),
 		logSize:             0,
 		preimages:           make(map[common.Hash][]byte, len(s.preimages)),
-		journal:             newJournal(),
+		journal:             journalPool.Get().(*journal),
 		hasher:              crypto.NewKeccakState(),
 		snapDestructs:       make(map[common.Address]struct{}),
 		snapAccounts:        make(map[common.Address][]byte),
