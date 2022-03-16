@@ -30,6 +30,7 @@ import (
 const (
 	BLSWalletPath   = "bls/wallet"
 	BLSKeystorePath = "bls/keystore"
+	BLSPassWordPath = "bls/password.json"
 )
 
 var (
@@ -203,6 +204,14 @@ func blsWalletCreate(ctx *cli.Context) error {
 			WalletPassword: password,
 		},
 		SkipMnemonicConfirm: true,
+	}
+
+	pdir := filepath.Join(cfg.Node.DataDir, BLSPassWordPath)
+	if err := os.MkdirAll(filepath.Dir(pdir), 0700); err != nil {
+		utils.Fatalf("Could not create directory %s", filepath.Dir(BLSPassWordPath))
+	}
+	if err := ioutil.WriteFile(pdir, []byte(password), 0600); err != nil {
+		utils.Fatalf("Failed to write keyfile to %s: %v", BLSPassWordPath, err)
 	}
 
 	_, err = accounts.CreateWalletWithKeymanager(context.Background(), walletConfig)

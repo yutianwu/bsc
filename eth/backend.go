@@ -18,13 +18,19 @@
 package eth
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"io/ioutil"
 	"math/big"
+	"path/filepath"
 	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/prysmaticlabs/prysm/validator/accounts/iface"
+	"github.com/prysmaticlabs/prysm/validator/accounts/wallet"
 
 	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/common"
@@ -58,6 +64,12 @@ import (
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/ethereum/go-ethereum/rpc"
+)
+
+const (
+	BLSWalletPath   = "bls/wallet"
+	VoteJournalPath = "vote/journal"
+	BLSPassWordPath = "bls/password.json"
 )
 
 // Config contains the configuration options of the ETH protocol.
@@ -232,19 +244,61 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	}
 	eth.txPool = core.NewTxPool(config.TxPool, chainConfig, eth.blockchain)
 
-	// //TODO:
-	// // Create vote related object.
-	// if journal, err := vote.NewVoteJournal(""); err == nil {
-	// 	eth.voteJournal = journal
-	// }
-	// if signer, err := vote.NewVoteSigner(nil); err == nil {
-	// 	eth.voteSigner = signer
-	// }
+	dataDir := stack.Config().DataDir
+	walletDir := filepath.Join(dataDir, BLSWalletPath)
 
-	// if voteManager, err := vote.NewVoteManager(eth.EventMux(), chainConfig, eth.blockchain, eth.voteJournal, eth.voteSigner); err == nil {
-	//	eth.voteManager = voteManager
-	// }
-	// votePool := vote.NewVotePool(chainConfig, eth.blockchain, eth.voteManager, nil)
+	dirExists, err := wallet.Exists(walletDir)
+	if err != nil {
+		log.Error("Check BLS wallet exists error: %v.", err)
+	}
+	if !dirExists {
+		log.Error("BLS wallet did not exists in <DATADIR>/bls/wallet.")
+	}
+
+	blsPasswordFile := filepath.Join(dataDir, BLSPassWordPath)
+	walletPassword, err := ioutil.ReadFile(blsPasswordFile)
+	if err != nil {
+		log.Error("Read BLS wallet password error: %v.", err)
+		return nil, err
+	}
+
+	w, err := wallet.OpenWallet(context.Background(), &wallet.Config{
+		WalletDir:      walletDir,
+		WalletPassword: string(walletPassword),
+	})
+	if err != nil {
+		log.Error("Open BLS wallet failed: %v.", err)
+	}
+
+	km, err := w.InitializeKeymanager(context.Background(), iface.InitKeymanagerConfig{ListenForChanges: false})
+	if err != nil {
+		log.Error("Initialize key manager failed: %v.", err)
+	}
+
+	//Create vote related object.
+	voteJournalFile := filepath.Join(dataDir, VoteJournalPath)
+	journal, err := vote.NewVoteJournal(voteJournalFile)
+	if err != nil {
+		log.Error("Failed to Initialize key manager: %v.", err)
+		return nil, err
+	}
+	eth.voteJournal = journal
+
+	signer, err := vote.NewVoteSigner(&km)
+	if err != nil {
+		log.Error("Failed to Initialize vote signer: %v.", err)
+		return nil, err
+	}
+	eth.voteSigner = signer
+
+	votePool := vote.NewVotePool(chainConfig, eth.blockchain, eth.engine)
+
+	if voteManager, err := vote.NewVoteManager(eth.EventMux(), chainConfig, eth.blockchain, journal, signer, votePool); err == nil {
+		eth.voteManager = voteManager
+	} else {
+		log.Error("Failed to Initialize voteManager: %v.", err)
+		return nil, err
+	}
 
 	// Permit the downloader to use the trie cache allowance during fast sync
 	cacheLimit := cacheConfig.TrieCleanLimit + cacheConfig.TrieDirtyLimit + cacheConfig.SnapshotLimit
