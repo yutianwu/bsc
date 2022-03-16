@@ -16,6 +16,8 @@
 package vote
 
 import (
+	"github.com/prysmaticlabs/prysm/validator/keymanager"
+
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/eth/downloader"
@@ -43,7 +45,7 @@ type VoteManager struct {
 	journal *VoteJournal
 }
 
-func NewVoteManager(mux *event.TypeMux, chainconfig *params.ChainConfig, chain *core.BlockChain, journal *VoteJournal, signer *VoteSigner, pool *VotePool) (*VoteManager, error) {
+func NewVoteManager(mux *event.TypeMux, chainconfig *params.ChainConfig, chain *core.BlockChain, pool *VotePool, km *keymanager.IKeymanager, journalPath string) (*VoteManager, error) {
 	voteManager := &VoteManager{
 		mux: mux,
 
@@ -51,10 +53,20 @@ func NewVoteManager(mux *event.TypeMux, chainconfig *params.ChainConfig, chain *
 		chainconfig: chainconfig,
 		chainHeadCh: make(chan core.ChainHeadEvent, chainHeadChanSize),
 
-		signer:  signer,
-		journal: journal,
-		pool:    pool,
+		pool: pool,
 	}
+
+	voteJournal, err := NewVoteJournal(journalPath)
+	if err != nil {
+		return nil, err
+	}
+	voteManager.journal = voteJournal
+
+	voteSigner, err := NewVoteSigner(km)
+	if err != nil {
+		return nil, err
+	}
+	voteManager.signer = voteSigner
 
 	voteManager.chainHeadSub = voteManager.chain.SubscribeChainHeadEvent(voteManager.chainHeadCh)
 

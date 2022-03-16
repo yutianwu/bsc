@@ -23,7 +23,6 @@ import (
 	"fmt"
 	"io/ioutil"
 	"math/big"
-	"path/filepath"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -66,12 +65,6 @@ import (
 	"github.com/ethereum/go-ethereum/rpc"
 )
 
-const (
-	BLSWalletPath   = "bls/wallet"
-	VoteJournalPath = "vote/journal"
-	BLSPassWordPath = "bls/password.json"
-)
-
 // Config contains the configuration options of the ETH protocol.
 // Deprecated: use ethconfig.Config instead.
 type Config = ethconfig.Config
@@ -111,8 +104,6 @@ type Ethereum struct {
 
 	lock sync.RWMutex // Protects the variadic fields (e.g. gas price and etherbase)
 
-	voteJournal *vote.VoteJournal
-	voteSigner  *vote.VoteSigner
 	votePool    *vote.VotePool
 	voteManager *vote.VoteManager
 }
@@ -244,10 +235,12 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	}
 	eth.txPool = core.NewTxPool(config.TxPool, chainConfig, eth.blockchain)
 
-	dataDir := stack.Config().DataDir
-	walletDir := filepath.Join(dataDir, BLSWalletPath)
+	conf := stack.Config()
+	bLSPassWordPath := stack.ResolvePath(conf.BLSPassWordDir)
+	bLSWalletPath := stack.ResolvePath(conf.BLSWalletDir)
+	voteJournalPath := stack.ResolvePath(conf.VoteJournalDir)
 
-	dirExists, err := wallet.Exists(walletDir)
+	dirExists, err := wallet.Exists(bLSWalletPath)
 	if err != nil {
 		log.Error("Check BLS wallet exists error: %v.", err)
 	}
@@ -255,15 +248,14 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		log.Error("BLS wallet did not exists in <DATADIR>/bls/wallet.")
 	}
 
-	blsPasswordFile := filepath.Join(dataDir, BLSPassWordPath)
-	walletPassword, err := ioutil.ReadFile(blsPasswordFile)
+	walletPassword, err := ioutil.ReadFile(bLSPassWordPath)
 	if err != nil {
 		log.Error("Read BLS wallet password error: %v.", err)
 		return nil, err
 	}
 
 	w, err := wallet.OpenWallet(context.Background(), &wallet.Config{
-		WalletDir:      walletDir,
+		WalletDir:      bLSWalletPath,
 		WalletPassword: string(walletPassword),
 	})
 	if err != nil {
@@ -273,27 +265,15 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	km, err := w.InitializeKeymanager(context.Background(), iface.InitKeymanagerConfig{ListenForChanges: false})
 	if err != nil {
 		log.Error("Initialize key manager failed: %v.", err)
-	}
-
-	//Create vote related object.
-	voteJournalFile := filepath.Join(dataDir, VoteJournalPath)
-	journal, err := vote.NewVoteJournal(voteJournalFile)
-	if err != nil {
-		log.Error("Failed to Initialize key manager: %v.", err)
 		return nil, err
 	}
-	eth.voteJournal = journal
 
-	signer, err := vote.NewVoteSigner(&km)
-	if err != nil {
-		log.Error("Failed to Initialize vote signer: %v.", err)
-		return nil, err
-	}
-	eth.voteSigner = signer
-
+	// Create votePool instance
 	votePool := vote.NewVotePool(chainConfig, eth.blockchain, eth.engine)
+	eth.votePool = votePool
 
-	if voteManager, err := vote.NewVoteManager(eth.EventMux(), chainConfig, eth.blockchain, journal, signer, votePool); err == nil {
+	// Create voteManager instance
+	if voteManager, err := vote.NewVoteManager(eth.EventMux(), chainConfig, eth.blockchain, votePool, &km, voteJournalPath); err == nil {
 		eth.voteManager = voteManager
 	} else {
 		log.Error("Failed to Initialize voteManager: %v.", err)

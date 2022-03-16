@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/ethereum/go-ethereum/cmd/utils"
 	"github.com/google/uuid"
 	"github.com/logrusorgru/aurora"
 	"github.com/prysmaticlabs/prysm/crypto/bls"
@@ -25,12 +24,13 @@ import (
 	"github.com/prysmaticlabs/prysm/validator/keymanager/imported"
 	keystorev4 "github.com/wealdtech/go-eth2-wallet-encryptor-keystorev4"
 	"gopkg.in/urfave/cli.v1"
+
+	"github.com/ethereum/go-ethereum/cmd/utils"
 )
 
 const (
 	BLSWalletPath   = "bls/wallet"
 	BLSKeystorePath = "bls/keystore"
-	BLSPassWordPath = "bls/password.json"
 )
 
 var (
@@ -204,14 +204,6 @@ func blsWalletCreate(ctx *cli.Context) error {
 			WalletPassword: password,
 		},
 		SkipMnemonicConfirm: true,
-	}
-
-	pdir := filepath.Join(cfg.Node.DataDir, BLSPassWordPath)
-	if err := os.MkdirAll(filepath.Dir(pdir), 0700); err != nil {
-		utils.Fatalf("Could not create directory %s", filepath.Dir(BLSPassWordPath))
-	}
-	if err := ioutil.WriteFile(pdir, []byte(password), 0600); err != nil {
-		utils.Fatalf("Failed to write keyfile to %s: %v", BLSPassWordPath, err)
 	}
 
 	_, err = accounts.CreateWalletWithKeymanager(context.Background(), walletConfig)
