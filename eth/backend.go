@@ -18,18 +18,13 @@
 package eth
 
 import (
-	"context"
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"math/big"
 	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"github.com/prysmaticlabs/prysm/validator/accounts/iface"
-	"github.com/prysmaticlabs/prysm/validator/accounts/wallet"
 
 	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/common"
@@ -240,44 +235,15 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	bLSWalletPath := stack.ResolvePath(conf.BLSWalletDir)
 	voteJournalPath := stack.ResolvePath(conf.VoteJournalDir)
 
-	dirExists, err := wallet.Exists(bLSWalletPath)
-	if err != nil {
-		log.Error("Check BLS wallet exists error: %v.", err)
-	}
-	if !dirExists {
-		log.Error("BLS wallet did not exists in <DATADIR>/bls/wallet.")
-	}
-
-	walletPassword, err := ioutil.ReadFile(bLSPassWordPath)
-	if err != nil {
-		log.Error("Read BLS wallet password error: %v.", err)
-		return nil, err
-	}
-
-	w, err := wallet.OpenWallet(context.Background(), &wallet.Config{
-		WalletDir:      bLSWalletPath,
-		WalletPassword: string(walletPassword),
-	})
-	if err != nil {
-		log.Error("Open BLS wallet failed: %v.", err)
-	}
-
-	km, err := w.InitializeKeymanager(context.Background(), iface.InitKeymanagerConfig{ListenForChanges: false})
-	if err != nil {
-		log.Error("Initialize key manager failed: %v.", err)
-		return nil, err
-	}
-
 	// Create votePool instance
 	votePool := vote.NewVotePool(chainConfig, eth.blockchain, eth.engine)
 	eth.votePool = votePool
 
 	// Create voteManager instance
-	if voteManager, err := vote.NewVoteManager(eth.EventMux(), chainConfig, eth.blockchain, votePool, &km, voteJournalPath); err == nil {
+	if voteManager, err := vote.NewVoteManager(eth.EventMux(), chainConfig, eth.blockchain, votePool, voteJournalPath, bLSPassWordPath, bLSWalletPath); err == nil {
 		eth.voteManager = voteManager
 	} else {
 		log.Error("Failed to Initialize voteManager: %v.", err)
-		return nil, err
 	}
 
 	// Permit the downloader to use the trie cache allowance during fast sync
