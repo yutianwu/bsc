@@ -80,6 +80,7 @@ func NewVoteManager(mux *event.TypeMux, chainconfig *params.ChainConfig, chain *
 	})
 	if err != nil {
 		log.Error("Open BLS wallet failed: %v.", err)
+		return nil, err
 	}
 
 	km, err := w.InitializeKeymanager(context.Background(), iface.InitKeymanagerConfig{ListenForChanges: false})

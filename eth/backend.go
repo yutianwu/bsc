@@ -99,8 +99,7 @@ type Ethereum struct {
 
 	lock sync.RWMutex // Protects the variadic fields (e.g. gas price and etherbase)
 
-	votePool    *vote.VotePool
-	voteManager *vote.VoteManager
+	votePool *vote.VotePool
 }
 
 // New creates a new Ethereum object (including the
@@ -240,12 +239,9 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	eth.votePool = votePool
 
 	// Create voteManager instance
-	if voteManager, err := vote.NewVoteManager(eth.EventMux(), chainConfig, eth.blockchain, votePool, voteJournalPath, bLSPassWordPath, bLSWalletPath); err == nil {
-		eth.voteManager = voteManager
-	} else {
+	if _, err := vote.NewVoteManager(eth.EventMux(), chainConfig, eth.blockchain, votePool, voteJournalPath, bLSPassWordPath, bLSWalletPath); err != nil {
 		log.Error("Failed to Initialize voteManager: %v.", err)
 	}
-
 	// Permit the downloader to use the trie cache allowance during fast sync
 	cacheLimit := cacheConfig.TrieCleanLimit + cacheConfig.TrieDirtyLimit + cacheConfig.SnapshotLimit
 	checkpoint := config.Checkpoint
