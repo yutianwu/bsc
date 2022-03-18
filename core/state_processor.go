@@ -75,6 +75,7 @@ type ParallelStateProcessor struct {
 	txResultChan         chan *ParallelTxResult // to notify dispatcher that a tx is done
 	slotState            []*SlotState           // idle, or pending messages
 	mergedTxIndex        int                    // the latest finalized tx index
+	slotDBsToRelease     []*state.StateDB
 	debugErrorRedoNum    int
 	debugConflictRedoNum int
 }
@@ -641,6 +642,7 @@ func (p *ParallelStateProcessor) waitUntilNextTxDone(statedb *state.StateDB, gp 
 	// It is safe, since write and read is in sequential, do write -> notify -> read
 	// It is not good, but work right now.
 	changeList := statedb.MergeSlotDB(result.slotDB, result.receipt, resultTxIndex)
+	p.slotDBsToRelease = append(p.slotDBsToRelease, result.slotDB)
 	resultSlotState.mergedChangeList = append(resultSlotState.mergedChangeList, changeList)
 
 	if resultTxIndex != p.mergedTxIndex+1 {
@@ -830,6 +832,15 @@ func (p *ParallelStateProcessor) resetState(txNum int, statedb *state.StateDB) {
 	p.debugConflictRedoNum = 0
 
 	statedb.PrepareForParallel()
+
+	stateDBsToRelease := p.slotDBsToRelease
+	p.slotDBsToRelease = make([]*state.StateDB, 0, txNum)
+
+	go func() {
+		for _, slotDB := range stateDBsToRelease {
+			slotDB.SlotDBPutSyncPool()
+		}
+	}()
 
 	for _, slot := range p.slotState {
 		slot.tailTxReq = nil
