@@ -79,8 +79,8 @@ github.com/beorn7/perks v0.0.0-20180321164747-3a771d992973/go.mod h1:Dwedo/Wpr24
 github.com/beorn7/perks v1.0.0 h1:HWo1m869IqiPhD389kmkxeTalrjNbbJTC8LXupb+sl0=
 github.com/beorn7/perks v1.0.0/go.mod h1:KWe93zE9D1o94FZ5RNwFwVgaQK1VOXiVxmqh+CedLV8=
 github.com/bmizerany/pat v0.0.0-20170815010413-6226ea591a40/go.mod h1:8rLXio+WjiTceGBHIoTvn60HIbs7Hm7bcHjyrSqYB9c=
-github.com/bnb-chain/ics23 v0.0.0-20221021082321-d0a365dd9898 h1:lnDi72nkJTb/3pihvIyz6F3YGqCcom9iP+kva3h0iyM=
-github.com/bnb-chain/ics23 v0.0.0-20221021082321-d0a365dd9898/go.mod h1:cU6lTGolbbLFsGCgceNB2AzplH1xecLp6+KXvxM32nI=
+github.com/bnb-chain/ics23 v0.1.0 h1:DvjGOts2FBfbxB48384CYD1LbcrfjThFz8kowY/7KxU=
+github.com/bnb-chain/ics23 v0.1.0/go.mod h1:cU6lTGolbbLFsGCgceNB2AzplH1xecLp6+KXvxM32nI=
 github.com/bnb-chain/tendermint v0.31.12 h1:g+blWaXkRw6iHa56lcRfRzPXHgURCWPmgIvaGBSV7Zc=
 github.com/bnb-chain/tendermint v0.31.12/go.mod h1:j6XU7CArrhQ+9XBMRwdIz63iUxdVwSrZ8f7vP7gcCqg=
 github.com/boltdb/bolt v1.3.1/go.mod h1:clJnj/oiGkjum5o1McbSZDSLxVThjynRyGBgiAx27Ps=
