@@ -738,11 +738,11 @@ func (c *ChainConfig) IsOnMoran(num *big.Int) bool {
 }
 
 func (c *ChainConfig) IsBohr(num *big.Int) bool {
-	return isForked(c.MoranBlock, num)
+	return isForked(c.BohrBlock, num)
 }
 
 func (c *ChainConfig) IsOnBohr(num *big.Int) bool {
-	return configNumEqual(c.MoranBlock, num)
+	return configNumEqual(c.BohrBlock, num)
 }
 
 // CheckCompatible checks whether scheduled fork transitions have been imported
